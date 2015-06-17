@@ -2339,18 +2339,13 @@ int main(int argc, const char **argv)
                         vcos_log_error("Unable to send a buffer to encoder output port (%d)", q);
                   }
                }
-
                
                gettimeofday(&lastMotionFrameTime, NULL);
                int initialCapturing=state.bCapturing;
-               if (mmal_port_parameter_set_boolean(camera_video_port, MMAL_PARAMETER_CAPTURE, 1) != MMAL_SUCCESS)
-               {
-                  // How to handle?
-               }
                while (running)
                {
                   // Change state
-/*
+
                   state.bCapturing = !state.bCapturing;
 
                   if (mmal_port_parameter_set_boolean(camera_video_port, MMAL_PARAMETER_CAPTURE, state.bCapturing) != MMAL_SUCCESS)
@@ -2371,7 +2366,7 @@ int main(int argc, const char **argv)
                      else
                         fprintf(stderr, "Pausing video capture\n");
                   }
-
+                  
                   if(state.splitWait)
                   {
                      if(state.bCapturing)
@@ -2384,24 +2379,11 @@ int main(int argc, const char **argv)
                      else
                      {
                         if(!initialCapturing)
-                           state.splitNow=1;
+                           state.splitNow=1;   
                      }
                      initialCapturing=0;
                   }
-*/
-                  /*pthread_mutex_lock(&mtx);
-                  pthread_cond_wait(&var, &mtx);
-                  pthread_mutex_unlock(&mtx);
-                  if (mmal_port_parameter_set_boolean(encoder_output_port, MMAL_PARAMETER_VIDEO_REQUEST_I_FRAME, 1) != MMAL_SUCCESS)
-                  {
-                     vcos_log_error("failed to request I-FRAME");
-                  }
-                  else
-                  {
-                	  fprintf(stderr, "Key frame requested\n");
-                  }*/
-                  sleep(111111);
-                  //running = wait_for_next_change(&state);
+                  running = wait_for_next_change(&state);
                }
 
                if (state.verbose)
