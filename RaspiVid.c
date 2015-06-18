@@ -127,6 +127,50 @@ typedef struct
    short sad;
 } INLINE_MOTION_VECTOR;
 
+
+static void WriteText(RASPIVID_STATE *state, const char* text)
+{
+	raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
+						text,
+                       state->camera_parameters.annotate_text_size,
+                       state->camera_parameters.annotate_text_colour,
+                       state->camera_parameters.annotate_bg_colour);
+}
+
+char DetectMotion(INLINE_MOTION_VECTOR *imv, RASPIVID_STATE *pstate)
+{
+	int64_t t_b;
+	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+		t_b = vcos_getmicrosecs64();
+	int i,j;
+	double sum = 0;
+	//printf("\033[2J");//clear terminal
+	for(j=0; j<pstate->mby; j++)
+	{
+		for(i=0; i<pstate->mbx; i++)
+		{
+			signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
+			signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
+			//printf("%.3d,%.3d|", vx,vy);
+
+			sum += sqrt(vx*vx+vy*vy);
+		}
+	}
+	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+		fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
+	if(sum > pstate->motion_threshold)
+		return 1;
+	return 0;
+}
+
+
+#define frames_to_skip_on_begin 50
+struct timeval lastMotionFrameTime;
+char strLastIdleCycleSeconds[]="0000000000";
+unsigned long frames_cnt = 0, frames_skipped = frames_to_skip_on_begin, 
+frames_saved = 0, key_frames_cnt=0, last_motion_frame=0, lastKeyFrameNum=0, 
+lost_frames_due_key_frame_late=0;
+
 /** Struct used to pass information in encoder port userdata to callback
  */
 typedef struct
@@ -1012,77 +1056,7 @@ static void update_annotation_data(RASPIVID_STATE *state)
    }
 }
 
-static void WriteText(RASPIVID_STATE *state, const char* text)
-{
-	raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
-						text,
-                       state->camera_parameters.annotate_text_size,
-                       state->camera_parameters.annotate_text_colour,
-                       state->camera_parameters.annotate_bg_colour);
-}
 
-char DetectMotion(INLINE_MOTION_VECTOR *imv, RASPIVID_STATE *pstate)
-{
-	int64_t t_b;
-	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-		t_b = vcos_getmicrosecs64();
-	int i,j;
-	double sum = 0;
-	//printf("\033[2J");//clear terminal
-	for(j=0; j<pstate->mby; j++)
-	{
-		for(i=0; i<pstate->mbx; i++)
-		{
-			signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
-			signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
-			//printf("%.3d,%.3d|", vx,vy);
-
-			sum += sqrt(vx*vx+vy*vy);
-		}
-	}
-	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-		fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
-	if(sum > pstate->motion_threshold)
-		return 1;
-	return 0;
-}
-
-struct _PreBuffer
-{
-	unsigned char* buf;
-	unsigned int bytesCount;
-	unsigned int maxSize;
-	unsigned long firstFrameNum, lastFrameNum;
-}PreBuffer;
-
-#define frames_to_skip_on_begin 50
-struct timeval lastMotionFrameTime;
-char strLastIdleCycleSeconds[]="0000000000";
-unsigned long frames_cnt = 0, frames_skipped = frames_to_skip_on_begin, frames_saved = 0, key_frames_cnt=0, last_motion_frame=0, lastKeyFrameNum=0, lost_frames_due_key_frame_late=0;
-void FeedLaskKeyFrameSequence(MMAL_BUFFER_HEADER_T *buffer, unsigned long frameNum)
-{
-	//its a key frame, fill the buffer from begin
-	if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
-	{
-		//fprintf(stderr, "Key frame!\n");
-		PreBuffer.bytesCount = 0;
-		PreBuffer.firstFrameNum = frameNum;
-	}
-	else
-	{
-		//its not a key frame and we still have no key frame, do nothing
-		if(0 == PreBuffer.bytesCount)
-			return;
-	}
-	if(PreBuffer.maxSize < PreBuffer.bytesCount + buffer->length)
-	{
-		fprintf(stderr, "Error: PreBuffer too small\n");
-		exit(1);
-	}
-	memcpy(PreBuffer.buf + PreBuffer.bytesCount, buffer->data, buffer->length);
-	PreBuffer.bytesCount += buffer->length;
-	PreBuffer.lastFrameNum = frameNum;
-}
 
 /**
  *  buffer header callback function for encoder
@@ -1114,12 +1088,94 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
       vcos_assert(pData->file_handle);
       if(pData->pstate->inlineMotionVectors) vcos_assert(pData->imv_file_handle);
 
+      if (pData->cb_buff)
       {
+         int space_in_buff = pData->cb_len - pData->cb_wptr;
+         int copy_to_end = space_in_buff > buffer->length ? buffer->length : space_in_buff;
+         int copy_to_start = buffer->length - copy_to_end;
+
+         if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
+         {
+            if(pData->header_wptr + buffer->length > sizeof(pData->header_bytes))
+            {
+               vcos_log_error("Error in header bytes\n");
+            }
+            else
+            {
+               // These are the header bytes, save them for final output
+               mmal_buffer_header_mem_lock(buffer);
+               memcpy(pData->header_bytes + pData->header_wptr, buffer->data, buffer->length);
+               mmal_buffer_header_mem_unlock(buffer);
+               pData->header_wptr += buffer->length;
+            }
+         }
+         else if((buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO))
+         {
+            // Do something with the inline motion vectors...
+         }
+         else
+         {
+            static int frame_start = -1;
+            int i;
+
+            if(frame_start == -1)
+               frame_start = pData->cb_wptr;
+
+            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
+            {
+               pData->iframe_buff[pData->iframe_buff_wpos] = frame_start;
+               pData->iframe_buff_wpos = (pData->iframe_buff_wpos + 1) % IFRAME_BUFSIZE;
+            }
+
+            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_FRAME_END)
+               frame_start = -1;
+
+            // If we overtake the iframe rptr then move the rptr along
+            if((pData->iframe_buff_rpos + 1) % IFRAME_BUFSIZE != pData->iframe_buff_wpos)
+            {
+               while(
+                  (
+                     pData->cb_wptr <= pData->iframe_buff[pData->iframe_buff_rpos] &&
+                    (pData->cb_wptr + buffer->length) > pData->iframe_buff[pData->iframe_buff_rpos]
+                  ) ||
+                  (
+                    (pData->cb_wptr > pData->iframe_buff[pData->iframe_buff_rpos]) &&
+                    (pData->cb_wptr + buffer->length) > (pData->iframe_buff[pData->iframe_buff_rpos] + pData->cb_len)
+                  )
+               )
+                  pData->iframe_buff_rpos = (pData->iframe_buff_rpos + 1) % IFRAME_BUFSIZE;
+            }
+
+            mmal_buffer_header_mem_lock(buffer);
+            // We are pushing data into a circular buffer
+            memcpy(pData->cb_buff + pData->cb_wptr, buffer->data, copy_to_end);
+            memcpy(pData->cb_buff, buffer->data + copy_to_end, copy_to_start);
+            mmal_buffer_header_mem_unlock(buffer);
+
+            if((pData->cb_wptr + buffer->length) > pData->cb_len)
+               pData->cb_wrap = 1;
+
+            pData->cb_wptr = (pData->cb_wptr + buffer->length) % pData->cb_len;
+
+            for(i = pData->iframe_buff_rpos; i != pData->iframe_buff_wpos; i = (i + 1) % IFRAME_BUFSIZE)
+            {
+               int p = pData->iframe_buff[i];
+               if(pData->cb_buff[p] != 0 || pData->cb_buff[p+1] != 0 || pData->cb_buff[p+2] != 0 || pData->cb_buff[p+3] != 1)
+               {
+                  vcos_log_error("Error in iframe list\n");
+               }
+            }
+         }
+      }
+      else 
+      {
+if(0 == pData->pstate->motion_threshold)
+{
          // For segmented record mode, we need to see if we have exceeded our time/size,
          // but also since we have inline headers turned on we need to break when we get one to
          // ensure that the new stream has the header in it. If we break on an I-frame, the
          // SPS/PPS header is actually in the previous chunk.
-         /*if ((buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) &&
+         if ((buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) &&
              ((pData->pstate->segmentSize && current_time > base_time + pData->pstate->segmentSize) ||
               (pData->pstate->splitWait && pData->pstate->splitNow)))
          {
@@ -1149,9 +1205,38 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
                fclose(pData->imv_file_handle);
                pData->imv_file_handle = new_handle;
             }
-         }*/
+         }
+         if (buffer->length)
+         {
+            mmal_buffer_header_mem_lock(buffer);
+            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO)
+            {
+               if(pData->pstate->inlineMotionVectors)
+               {
+                  bytes_written = fwrite(buffer->data, 1, buffer->length, pData->imv_file_handle);
+               }
+               else
+               {
+                  //We do not want to save inlineMotionVectors...
+                  bytes_written = buffer->length;
+               }
+            }
+            else
+            {
+               bytes_written = fwrite(buffer->data, 1, buffer->length, pData->file_handle);            
+            }
 
+            mmal_buffer_header_mem_unlock(buffer);
 
+            if (bytes_written != buffer->length)
+            {
+               vcos_log_error("Failed to write buffer data (%d from %d)- aborting", bytes_written, buffer->length);
+               pData->abort = 1;
+            }
+         }
+}
+else
+{
          if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
      		fwrite(buffer->data, 1, buffer->length, pData->file_handle);
          else if (buffer->length)
@@ -1175,7 +1260,7 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
 										frames_cnt, frames_skipped, key_frames_cnt);
 							if(!bPreFrameMotion)
 							{
-								//if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+								if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
 									fprintf(stderr, "requesting key frame\n");
 								if(mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_VIDEO_REQUEST_I_FRAME, 1) != MMAL_SUCCESS)
 								{
@@ -1267,70 +1352,6 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
             	{
             		frames_skipped++;
             	}
-
-/*
-					if(bMotionDetected)
-					{
-						fprintf(stderr, "frames=%lu, skipped=%lu, saved=%lu, motion detected\n",
-								frames_cnt, frames_skipped, frames_saved);
-						//Flush LaskKeyFrameSequence captured before motion was detected, if any
-						if(0 != PreBuffer.bytesCount)
-						{
-							fwrite(PreBuffer.buf, 1, PreBuffer.bytesCount, pData->file_handle);
-							PreBuffer.bytesCount = 0;
-
-							fprintf(stderr, "saving LaskKeyFrameSequence frames from=%lu, to=%lu\n",
-									PreBuffer.firstFrameNum, PreBuffer.lastFrameNum);
-
-							frames_skipped -= (PreBuffer.lastFrameNum - PreBuffer.firstFrameNum + 1);
-						}
-						bRequestI_Frame_on_no_motion = 1;
-						frames_saved++;
-						fwrite(buffer->data, 1, buffer->length, pData->file_handle);
-					}
-					else//if(bMotionDetected)
-					{
-						fprintf(stderr, "frames=%lu, skipped=%lu, saved=%lu, motion not detected\n",
-																frames_cnt, frames_skipped, frames_saved);
-						if(bRequestI_Frame_on_no_motion)
-						{
-
-							bRequestI_Frame_on_no_motion = 0;
-							fprintf(stderr, "frames=%lu, skipped=%lu, saved=%lu, requesting I-Frame\n",
-															frames_cnt, frames_skipped, frames_saved);
-						}
-						frames_skipped++;
-						FeedLaskKeyFrameSequence(buffer, frames_cnt);
-
-						//continue writing video to file until a next key frame
-						//even if no motion is detected
-
-						if(bWriteUntilNextKeyFrameAfterMotionDetected)
-						{
-							if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
-							{
-								//we have a keyframe, dont write it to file
-								frames_skipped++;
-								//reinitialize prekeyframe buffer
-								FeedLaskKeyFrameSequence(buffer, frames_cnt);
-								bWriteUntilNextKeyFrameAfterMotionDetected = 0;
-								fprintf(stderr, "frames=%lu, skipped=%lu, saved=%lu, motion not detected, next key frame reached\n",
-										frames_cnt, frames_skipped, frames_saved);
-							}
-							else
-							{
-								frames_saved++;
-								fprintf(stderr, "frames=%lu, skipped=%lu, saved=%lu, motion not detected, saving until next key frame\n",
-										frames_cnt, frames_skipped, frames_saved);
-								fwrite(buffer->data, 1, buffer->length, pData->file_handle);
-							}
-						}
-						else
-						{
-							frames_skipped++;
-							FeedLaskKeyFrameSequence(buffer, frames_cnt);
-						}
-					}*/
             }
             mmal_buffer_header_mem_unlock(buffer);
          }
@@ -1340,6 +1361,7 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
         	 exit(2);
          }
       }
+}
 
       // See if the second count has changed and we need to update any annotation
       if (current_time/1000 != last_second)
@@ -2280,11 +2302,6 @@ int main(int argc, const char **argv)
             if(state.width%16!=0)state.mbx++;
             if(state.height%16!=0)state.mby++;
             state.imv = malloc((state.mbx+1)*state.mby*sizeof(INLINE_MOTION_VECTOR));
-
-            PreBuffer.firstFrameNum = PreBuffer.lastFrameNum = 0;
-            PreBuffer.bytesCount = 0;
-            //bitrate in bytes/sec * 2
-            PreBuffer.buf = malloc(PreBuffer.maxSize = ((state.bitrate/8)*2));
          }
 
          encoder_output_port->userdata = (struct MMAL_PORT_USERDATA_T *)&state.callback_data;
