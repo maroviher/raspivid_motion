@@ -127,51 +127,6 @@ typedef struct
    short sad;
 } INLINE_MOTION_VECTOR;
 
-
-static void WriteText(RASPIVID_STATE *state, const char* text)
-{
-   raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
-                  text,
-                       state->camera_parameters.annotate_text_size,
-                       state->camera_parameters.annotate_text_colour,
-                       state->camera_parameters.annotate_bg_colour);
-}
-
-char DetectMotion(INLINE_MOTION_VECTOR *imv, RASPIVID_STATE *pstate)
-{
-   int64_t t_b;
-   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-      t_b = vcos_getmicrosecs64();
-   int i,j;
-   double sum = 0;
-   //printf("\033[2J");//clear terminal
-   for(j=0; j<pstate->mby; j++)
-   {
-      for(i=0; i<pstate->mbx; i++)
-      {
-         signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
-         signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
-         //printf("%.3d,%.3d|", vx,vy);
-
-         sum += sqrt(vx*vx+vy*vy);
-      }
-   }
-   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-      fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
-   if(sum > pstate->motion_threshold)
-      return 1;
-   return 0;
-}
-
-
-#define frames_to_skip_on_begin 50
-struct timeval lastMotionFrameTime;
-char strLastIdleCycleSeconds[]="0000000000";
-unsigned long frames_cnt = 0, frames_skipped = frames_to_skip_on_begin, 
-frames_saved = 0, key_frames_cnt=0, last_motion_frame=0, lastKeyFrameNum=0, 
-lost_frames_due_key_frame_late=0;
-
-
 /** Struct used to pass information in encoder port userdata to callback
  */
 typedef struct
@@ -252,6 +207,50 @@ struct RASPIVID_STATE_S
    int sensor_mode;			            /// Sensor mode. 0=auto. Check docs/forum for modes selected by other values.
    int intra_refresh_type;              /// What intra refresh type to use. -1 to not set.
 };
+
+
+static void WriteText(RASPIVID_STATE *state, const char* text)
+{
+   raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
+                  text,
+                       state->camera_parameters.annotate_text_size,
+                       state->camera_parameters.annotate_text_colour,
+                       state->camera_parameters.annotate_bg_colour);
+}
+
+char DetectMotion(INLINE_MOTION_VECTOR *imv, RASPIVID_STATE *pstate)
+{
+   int64_t t_b;
+   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+      t_b = vcos_getmicrosecs64();
+   int i,j;
+   double sum = 0;
+   //printf("\033[2J");//clear terminal
+   for(j=0; j<pstate->mby; j++)
+   {
+      for(i=0; i<pstate->mbx; i++)
+      {
+         signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
+         signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
+         //printf("%.3d,%.3d|", vx,vy);
+
+         sum += sqrt(vx*vx+vy*vy);
+      }
+   }
+   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+      fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
+   if(sum > pstate->motion_threshold)
+      return 1;
+   return 0;
+}
+
+
+#define frames_to_skip_on_begin 50
+struct timeval lastMotionFrameTime;
+char strLastIdleCycleSeconds[]="0000000000";
+unsigned long frames_cnt = 0, frames_skipped = frames_to_skip_on_begin,
+frames_saved = 0, key_frames_cnt=0, last_motion_frame=0, lastKeyFrameNum=0,
+lost_frames_due_key_frame_late=0;
 
 
 /// Structure to cross reference H264 profile strings against the MMAL parameter equivalent
