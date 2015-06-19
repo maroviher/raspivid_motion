@@ -130,8 +130,8 @@ typedef struct
 
 static void WriteText(RASPIVID_STATE *state, const char* text)
 {
-	raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
-						text,
+   raspicamcontrol_set_annotate(state->camera_component, ANNOTATE_USER_TEXT|ANNOTATE_TIME_TEXT,
+                  text,
                        state->camera_parameters.annotate_text_size,
                        state->camera_parameters.annotate_text_colour,
                        state->camera_parameters.annotate_bg_colour);
@@ -139,28 +139,28 @@ static void WriteText(RASPIVID_STATE *state, const char* text)
 
 char DetectMotion(INLINE_MOTION_VECTOR *imv, RASPIVID_STATE *pstate)
 {
-	int64_t t_b;
-	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-		t_b = vcos_getmicrosecs64();
-	int i,j;
-	double sum = 0;
-	//printf("\033[2J");//clear terminal
-	for(j=0; j<pstate->mby; j++)
-	{
-		for(i=0; i<pstate->mbx; i++)
-		{
-			signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
-			signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
-			//printf("%.3d,%.3d|", vx,vy);
+   int64_t t_b;
+   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+      t_b = vcos_getmicrosecs64();
+   int i,j;
+   double sum = 0;
+   //printf("\033[2J");//clear terminal
+   for(j=0; j<pstate->mby; j++)
+   {
+      for(i=0; i<pstate->mbx; i++)
+      {
+         signed char vx =-imv[i+(pstate->mbx+1)*j].x_vector;
+         signed char vy = imv[i+(pstate->mbx+1)*j].y_vector;
+         //printf("%.3d,%.3d|", vx,vy);
 
-			sum += sqrt(vx*vx+vy*vy);
-		}
-	}
-	if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
-		fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
-	if(sum > pstate->motion_threshold)
-		return 1;
-	return 0;
+         sum += sqrt(vx*vx+vy*vy);
+      }
+   }
+   if(pstate->motion_verbose & MOTION_DEBUG_STRONGNESS)
+      fprintf(stderr, "summe of motion=%5.1lf, time us=%llu\n", sum, vcos_getmicrosecs64() - t_b);
+   if(sum > pstate->motion_threshold)
+      return 1;
+   return 0;
 }
 
 
@@ -170,6 +170,7 @@ char strLastIdleCycleSeconds[]="0000000000";
 unsigned long frames_cnt = 0, frames_skipped = frames_to_skip_on_begin, 
 frames_saved = 0, key_frames_cnt=0, last_motion_frame=0, lastKeyFrameNum=0, 
 lost_frames_due_key_frame_late=0;
+
 
 /** Struct used to pass information in encoder port userdata to callback
  */
@@ -1169,199 +1170,183 @@ static void encoder_buffer_callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf
       }
       else 
       {
-if(0 == pData->pstate->motion_threshold)
-{
-         // For segmented record mode, we need to see if we have exceeded our time/size,
-         // but also since we have inline headers turned on we need to break when we get one to
-         // ensure that the new stream has the header in it. If we break on an I-frame, the
-         // SPS/PPS header is actually in the previous chunk.
-         if ((buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) &&
-             ((pData->pstate->segmentSize && current_time > base_time + pData->pstate->segmentSize) ||
-              (pData->pstate->splitWait && pData->pstate->splitNow)))
+         if(0 == pData->pstate->motion_threshold)
          {
-            FILE *new_handle;
-
-            base_time = current_time;
-
-            pData->pstate->splitNow = 0;
-            pData->pstate->segmentNumber++;
-
-            // Only wrap if we have a wrap point set
-            if (pData->pstate->segmentWrap && pData->pstate->segmentNumber > pData->pstate->segmentWrap)
-               pData->pstate->segmentNumber = 1;
-
-            new_handle = open_filename(pData->pstate);
-
-            if (new_handle)
+            // For segmented record mode, we need to see if we have exceeded our time/size,
+            // but also since we have inline headers turned on we need to break when we get one to
+            // ensure that the new stream has the header in it. If we break on an I-frame, the
+            // SPS/PPS header is actually in the previous chunk.
+            if ((buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG) &&
+                ((pData->pstate->segmentSize && current_time > base_time + pData->pstate->segmentSize) ||
+                 (pData->pstate->splitWait && pData->pstate->splitNow)))
             {
-               fclose(pData->file_handle);
-               pData->file_handle = new_handle;
-            }
+               FILE *new_handle;
 
-            new_handle = open_imv_filename(pData->pstate);
+               base_time = current_time;
 
-            if (new_handle)
-            {
-               fclose(pData->imv_file_handle);
-               pData->imv_file_handle = new_handle;
-            }
-         }
-         if (buffer->length)
-         {
-            mmal_buffer_header_mem_lock(buffer);
-            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO)
-            {
-               if(pData->pstate->inlineMotionVectors)
+               pData->pstate->splitNow = 0;
+               pData->pstate->segmentNumber++;
+
+               // Only wrap if we have a wrap point set
+               if (pData->pstate->segmentWrap && pData->pstate->segmentNumber > pData->pstate->segmentWrap)
+                  pData->pstate->segmentNumber = 1;
+
+               new_handle = open_filename(pData->pstate);
+
+               if (new_handle)
                {
-                  bytes_written = fwrite(buffer->data, 1, buffer->length, pData->imv_file_handle);
+                  fclose(pData->file_handle);
+                  pData->file_handle = new_handle;
+               }
+
+               new_handle = open_imv_filename(pData->pstate);
+
+               if (new_handle)
+               {
+                  fclose(pData->imv_file_handle);
+                  pData->imv_file_handle = new_handle;
+               }
+            }
+            if (buffer->length)
+            {
+               mmal_buffer_header_mem_lock(buffer);
+               if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO)
+               {
+                  if(pData->pstate->inlineMotionVectors)
+                  {
+                     bytes_written = fwrite(buffer->data, 1, buffer->length, pData->imv_file_handle);
+                  }
+                  else
+                  {
+                     //We do not want to save inlineMotionVectors...
+                     bytes_written = buffer->length;
+                  }
                }
                else
                {
-                  //We do not want to save inlineMotionVectors...
-                  bytes_written = buffer->length;
+                  bytes_written = fwrite(buffer->data, 1, buffer->length, pData->file_handle);
+               }
+
+               mmal_buffer_header_mem_unlock(buffer);
+
+               if (bytes_written != buffer->length)
+               {
+                  vcos_log_error("Failed to write buffer data (%d from %d)- aborting", bytes_written, buffer->length);
+                  pData->abort = 1;
                }
             }
-            else
-            {
-               bytes_written = fwrite(buffer->data, 1, buffer->length, pData->file_handle);            
-            }
-
-            mmal_buffer_header_mem_unlock(buffer);
-
-            if (bytes_written != buffer->length)
-            {
-               vcos_log_error("Failed to write buffer data (%d from %d)- aborting", bytes_written, buffer->length);
-               pData->abort = 1;
-            }
-         }
-}
-else
-{
-         if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
-     		fwrite(buffer->data, 1, buffer->length, pData->file_handle);
-         else if (buffer->length)
-         {
-            static char bMotionDetected = 0, bLastFrameRequestedAsKey = 0, bMustBeKeyFrame = 1, bPreFrameMotion = 1;
-            mmal_buffer_header_mem_lock(buffer);
-            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO)
-            {
-            	if(frames_cnt >= frames_to_skip_on_begin)
-            	{
-					//if((last_motion_frame+25) < frames_cnt)
-
-            		if(!bLastFrameRequestedAsKey)
-					{//detect motion only if last frame was not a key frame, key frames have no motion
-						bMotionDetected = DetectMotion((INLINE_MOTION_VECTOR*)&buffer->data[0], pData->pstate);
-						if(bMotionDetected)
-						{
-							last_motion_frame = frames_cnt+1;
-							if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-								fprintf(stderr, "vectors: motion detected, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
-										frames_cnt, frames_skipped, key_frames_cnt);
-							if(!bPreFrameMotion)
-							{
-								if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-									fprintf(stderr, "requesting key frame\n");
-								if(mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_VIDEO_REQUEST_I_FRAME, 1) != MMAL_SUCCESS)
-								{
-									vcos_log_error("failed to request I-FRAME");
-									exit(123);
-								}
-								bLastFrameRequestedAsKey = 1;
-
-								struct timeval time_motionDetected;
-								gettimeofday(&time_motionDetected, NULL);
-								snprintf(strLastIdleCycleSeconds, sizeof(strLastIdleCycleSeconds), "%d  ",
-										(int)(time_motionDetected.tv_sec - lastMotionFrameTime.tv_sec));
-							}
-							else
-							{
-								fprintf(stderr, ", NOT requesting key frame\n");
-							}
-						}
-						else
-						{
-							/*fprintf(stderr, "vectors: motion not detected, frames=%lu, keyframes=%lu\n",
-														frames_cnt, key_frames_cnt);*/
-						}
-						bPreFrameMotion = bMotionDetected;
-					}
-            		else
-            		{
-            			bLastFrameRequestedAsKey = 0;
-            		}
-					/*else
-					{
-
-						if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-							fprintf(stderr, "Skipping motion detection frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
-								frames_cnt, frames_skipped, key_frames_cnt);
-					}*/
-					WriteText(pData->pstate, strLastIdleCycleSeconds);
-            	}
-            }
-            else
-            {
-            	frames_cnt++;
-            	if(frames_cnt >= frames_to_skip_on_begin)
-            	{
-            		if(bMotionDetected)
-            		{
-            			char bSave=1;
-            			if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
-            			{
-            				if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-            					fprintf(stderr, "motion detected, got KEY frame, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
-            							frames_cnt, frames_skipped, key_frames_cnt);
-            				lastKeyFrameNum=frames_cnt;
-            				key_frames_cnt++;
-            				lost_frames_due_key_frame_late++;
-            				bMustBeKeyFrame = 0;
-            			}
-            			else
-            			{
-            				if(bMustBeKeyFrame)
-            				{
-            					bSave = 0;
-            					lost_frames_due_key_frame_late++;
-            					if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-            						fprintf(stderr, "Bad!!! Must be a KEY frame, lost... lastKeyFrameNum=%lu, frames=%lu, keyframes=%lu\n",
-            							lastKeyFrameNum, frames_cnt, key_frames_cnt);
-            				}
-            				else
-            				{
-            					if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
-            						fprintf(stderr, "motion detected, got NO KEY frame, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
-										frames_cnt, frames_skipped, key_frames_cnt);
-            				}
-            			}
-            			if(bSave)
-            				fwrite(buffer->data, 1, buffer->length, pData->file_handle);
-
-            			//store time of last saved frame
-						gettimeofday(&lastMotionFrameTime, NULL);
-
-            		}
-            		else//if(bMotionDetected)
-            		{
-            			frames_skipped++;
-            			bMustBeKeyFrame = 1;
-            		}
-            	}
-            	else
-            	{
-            		frames_skipped++;
-            	}
-            }
-            mmal_buffer_header_mem_unlock(buffer);
          }
          else
          {
-        	 fprintf(stderr, "fatal buffer=0");
-        	 exit(2);
+            if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CONFIG)
+               fwrite(buffer->data, 1, buffer->length, pData->file_handle);
+            else if (buffer->length)
+            {
+               static char bMotionDetected = 0, bLastFrameRequestedAsKey = 0, bMustBeKeyFrame = 1, bPreFrameMotion = 1;
+               mmal_buffer_header_mem_lock(buffer);
+               if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_CODECSIDEINFO)
+               {
+                  if(frames_cnt >= frames_to_skip_on_begin)
+                  {
+                     if(!bLastFrameRequestedAsKey)
+                     {//detect motion only if last frame was not a key frame, key frames have no motion
+                        bMotionDetected = DetectMotion((INLINE_MOTION_VECTOR*)&buffer->data[0], pData->pstate);
+                        if(bMotionDetected)
+                        {
+                           last_motion_frame = frames_cnt+1;
+                           if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+                              fprintf(stderr, "vectors: motion detected, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
+                                    frames_cnt, frames_skipped, key_frames_cnt);
+                           if(!bPreFrameMotion)
+                           {
+                              if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+                                 fprintf(stderr, "requesting key frame\n");
+                              if(mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_VIDEO_REQUEST_I_FRAME, 1) != MMAL_SUCCESS)
+                              {
+                                 vcos_log_error("failed to request I-FRAME");
+                                 exit(123);
+                              }
+                              bLastFrameRequestedAsKey = 1;
+
+                              struct timeval time_motionDetected;
+                              gettimeofday(&time_motionDetected, NULL);
+                              snprintf(strLastIdleCycleSeconds, sizeof(strLastIdleCycleSeconds), "%d  ",
+                                    (int)(time_motionDetected.tv_sec - lastMotionFrameTime.tv_sec));
+                           }
+                           else
+                           {
+                              fprintf(stderr, ", NOT requesting key frame\n");
+                           }
+                        }
+                        bPreFrameMotion = bMotionDetected;
+                     }
+                     else
+                     {
+                        bLastFrameRequestedAsKey = 0;
+                     }
+                     WriteText(pData->pstate, strLastIdleCycleSeconds);
+                  }
+               }
+               else
+               {
+                  frames_cnt++;
+                  if(frames_cnt >= frames_to_skip_on_begin)
+                  {
+                     if(bMotionDetected)
+                     {
+                        char bSave=1;
+                        if(buffer->flags & MMAL_BUFFER_HEADER_FLAG_KEYFRAME)
+                        {
+                           if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+                              fprintf(stderr, "motion detected, got KEY frame, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
+                                    frames_cnt, frames_skipped, key_frames_cnt);
+                           lastKeyFrameNum=frames_cnt;
+                           key_frames_cnt++;
+                           lost_frames_due_key_frame_late++;
+                           bMustBeKeyFrame = 0;
+                        }
+                        else
+                        {
+                           if(bMustBeKeyFrame)
+                           {
+                              bSave = 0;
+                              lost_frames_due_key_frame_late++;
+                              if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+                                 fprintf(stderr, "Bad!!! Must be a KEY frame, lost... lastKeyFrameNum=%lu, frames=%lu, keyframes=%lu\n",
+                                       lastKeyFrameNum, frames_cnt, key_frames_cnt);
+                           }
+                           else
+                           {
+                              if (pData->pstate->motion_verbose & MOTION_DEBUG_STATISTICS)
+                                 fprintf(stderr, "motion detected, got NO KEY frame, frame=%lu, frames_skipped=%lu, keyframes=%lu\n",
+                                       frames_cnt, frames_skipped, key_frames_cnt);
+                           }
+                        }
+                        if(bSave)
+                           fwrite(buffer->data, 1, buffer->length, pData->file_handle);
+
+                        gettimeofday(&lastMotionFrameTime, NULL);//store time of last saved frame
+                     }
+                     else//if(bMotionDetected)
+                     {
+                        frames_skipped++;
+                        bMustBeKeyFrame = 1;
+                     }
+                  }
+                  else
+                  {
+                     frames_skipped++;
+                  }
+               }
+               mmal_buffer_header_mem_unlock(buffer);
+            }
+            else
+            {
+               fprintf(stderr, "fatal buffer=0");
+               exit(2);
+            }
          }
       }
-}
 
       // See if the second count has changed and we need to update any annotation
       if (current_time/1000 != last_second)
